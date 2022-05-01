@@ -70,6 +70,10 @@ classdef Rosette < handle
         theta   double = [] % Array of thetas to simplify scaling along the basis.
     end
     
+    properties (Hidden, Constant)
+        ColorOrder = parula(8); 
+    end
+    
     methods
         function self = Rosette(ax, xc, yc, V, label, value, prop_vals)
             %Rosette  Constructor for Rosette graphics object
@@ -123,18 +127,16 @@ classdef Rosette < handle
             end
             if nargin < 7
                 prop_vals = repmat({{}}, size(V, 1), 1);
+            else
+                if numel(prop_vals) == 1
+                    prop_vals = repmat(prop_vals, size(V, 1), 1); 
+                end
             end
             self.ring = line(ax, nan, nan, ...
                 'LineWidth', 1, 'Color', 'k', 'LineStyle', ':', ...
                 'Marker', 'o', 'MarkerFaceColor', 'b');
             self.ring.Annotation.LegendInformation.IconDisplayStyle = 'off';
             self.add_vector(V, label, value, prop_vals);
-            if isempty(self.Parent.DeleteFcn)
-                self.Parent.UserData.chain_callback = {@(~, ~)delete(self)};
-                self.Parent.DeleteFcn = @Rosette.callback_chainer;
-            else
-                self.Parent.UserData.chain_callback{end+1} = @(~, ~)delete(self);
-            end
         end
         
         function add_vector(self, V, label, value, prop_vals)
@@ -164,6 +166,10 @@ classdef Rosette < handle
             end
             if nargin < 4
                 prop_vals = repmat({{}}, size(V, 1), 1);
+            else
+                if numel(prop_vals) == 1
+                    prop_vals = repmat(prop_vals, size(V, 1), 1);
+                end
             end
             if size(V, 1) > 1
                 if numel(label) ~= size(V, 1)
@@ -184,7 +190,8 @@ classdef Rosette < handle
             T = table(index, x, y, label, value);
             self.Vector = vertcat(self.Vector, T);
             h = line(self.Parent, X, Y, ...
-                'Color', 'k', 'LineWidth', 1.5, 'LineStyle', '-', ...
+                'Color', self.ColorOrder(index, :), ...
+                'LineWidth', 1.5, 'LineStyle', '-', ...
                 prop_vals{:});
             h.Annotation.LegendInformation.IconDisplayStyle = 'off';
             self.basis(index) = h;
@@ -193,7 +200,9 @@ classdef Rosette < handle
             self.label(index) = text(self.Parent, ...
                 self.label_offset .* self.r(index) .* cos(self.theta(index)) + self.Position(1), ...
                 self.label_offset .* self.r(index) .* sin(self.theta(index)) + self.Position(2), label, ...
-                'FontName', 'Tahoma', 'Color', 'k');
+                'FontName', 'Tahoma', 'Color', self.ColorOrder(index, :), ...
+                'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle', ...
+                'Rotation', 45);
             xv = value .* self.r(index) .* cos(self.theta(index)) + self.Position(1);
             yv = value .* self.r(index) .* sin(self.theta(index)) + self.Position(2);
             self.ring.XData(index) = xv;
