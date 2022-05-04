@@ -15,6 +15,7 @@ classdef Rosette < handle
     %   Rosette - Constructor
     %   add_vector - (Public) method to add vector(s) and labels to basis
     %   get_scaled_value - (Public) Returns the value for indexed basis, including center offset and basis scaling.
+    %   modify_cloud - (Public) method that changes properties of the "point cloud" along one or more rosette axes.
     %   modify_label - (Public) method that modifies the text label associated to a given indexed basis vector.
     %   modify_label_offset - (Public) Change value of protected `label_offset` property
     %   modify_value - (Public) method to modify value(s) of indexed basis vectors
@@ -26,7 +27,7 @@ classdef Rosette < handle
     %   r = Rosette(ax, xc, yc, V); % Create a Rosette with unlabeled vectors
     %   r = Rosette(ax, xc, yc, V, label); % Create a Rosette with labeled vectors.
     %   r = Rosette(ax, xc, yc, V, label, value); % Create a Rosette with labeled vectors and values on those vectors.
-    %   r = Rosette(__, prop_vals); % Specify <'Name', Value> pairs for each vector.
+    %   r = Rosette(__, {'Name', value}, ...); % Specify <'Name', Value> pairs for each vector.
     %
     % Inputs:
     %   ax - Parent axes handle.
@@ -57,24 +58,24 @@ classdef Rosette < handle
         Parent      matlab.graphics.axis.Axes
         Position    double = [0, 0]
         Vector      table
-    end
-    
-    properties (Hidden, Access = public)
-        ColorOrder      double
-        label_offset    double = 1.25;  % The scalar for offsetting labels from tip of the basis indicator 
-        cloud_jitter    double = 0.020; % The jitter on 2D Gaussian applied to points in data cloud along each axes
+        
+        CData           uint8           % Colormap used to key the labels and vectors.
+        CDataMode       string = "auto";% Mode for assigning colors. Default is "auto" and distributes colorspace along CData. "flat" just increases color index by 1 for each additional rosette vector.
+        Jitter          double = 0.020; % The jitter on 2D Gaussian applied to points in data cloud along each axes
+        LabelOffset     double = 1.25;  % The scalar for offsetting labels from tip of the basis indicator 
     end
     
     properties (Access = protected)
         basis   matlab.graphics.primitive.Line           % Array of line objects indicating basis in 2D plane
         label   matlab.graphics.primitive.Text           % Primitive text object array labeling each basis vector
         cloud   matlab.graphics.chart.primitive.Scatter  % Primitive scatter object indicating values along basis
+        c       uint8  = []                              % The actual colors that are used (depends on CDataMode and CData)
         r       double = []                              % Array of radii to simplify scaling along this basis.
         theta   double = []                              % Array of thetas to simplify scaling along the basis.
     end
     
     methods
-        function self = Rosette(ax, xc, yc, V, label, value, prop_vals)
+        function self = Rosette(ax, xc, yc, V, label, value, varargin)
             %Rosette  Constructor for Rosette graphics object
             %
             % Syntax:
@@ -82,7 +83,8 @@ classdef Rosette < handle
             %   r = Rosette(ax, xc, yc, V); % Create a Rosette with unlabeled vectors
             %   r = Rosette(ax, xc, yc, V, label); % Create a Rosette with labeled vectors.
             %   r = Rosette(ax, xc, yc, V, label, value); % Create a Rosette with labeled vectors and values on those vectors.
-            %   r = Rosette(__, prop_vals); % Specify <'Name', Value> pairs for each vector.
+            %   r = Rosette(__, {'Name', value, ...}, {'Name', value, ...}, 'Name', value, ...); 
+            %       
             %
             % Inputs:
             %   ax - Parent axes handle.
@@ -95,20 +97,26 @@ classdef Rosette < handle
             %            character vectors labeling each axis.
             %   value - nVector x 1 array of values indicating scaling
             %            along each axis.
-            %   prop_vals - nVector x 1 array of cells, where each cell
-            %               element is itself either an empty cell array,
-            %               or a cell array with an even number of
-            %               elements, where the first element is a `Line`
-            %               property name and the second is the
-            %               corresponding value to set for that `Line`
-            %               object, which corresponds to a "spoke" on the
-            %               Rosette.
+            %   varargin - Specify {'Name', Value, ...} pairs for each
+            %                   nVector x 1 array element in `label` and
+            %                   `value`. If left empty they will use
+            %                   default values.
+            %
+            %              Specify <'Name', value> pairs (outside of cell 
+            %               arrays) to set global Rosette properties:
+            %                   * CData: Colormap used to key the labels 
+            %                   * CDataMode: "auto" or "fixed"
+            %                   * Jitter: Jitter on 2D Gaussian applied to 
+            %                             points in data cloud along each 
+            %                             axes.
+            %                   * LabelOffset: The scalar for offsetting 
+            %                                  labels
             %
             % Outputs:
             %   r - Rosette object (handle subclass)
             %
             % See also: Contents
-            self.ColorOrder = parula(8); 
+            self.CData = cm.map('rosette'); 
             if nargin < 1
                 ax = gca;
             end
@@ -129,13 +137,31 @@ classdef Rosette < handle
                 value = nan(size(V, 1), 1);
             end
             if nargin < 7
-                prop_vals = repmat({{}}, size(V, 1), 1);
+                varargin = repmat({{}}, size(V, 1), 1);
             else
-                if numel(prop_vals) == 1
-                    prop_vals = repmat(prop_vals, size(V, 1), 1); 
+                k = 1;
+                while k <= numel(varargin)
+                    if iscell(varargin{k})
+                        k = k + 1;
+                    else
+                        try
+                            self.(varargin{k}) = varargin{k+1};
+                        catch
+                            if (k + 1) > numel(varargin)
+                                error("Bad number of 'Name', value pairs, check varargin input.");
+                            end
+                            warning("Error assigning varargin{%d} (varargin{%d}): ", k, k+1);
+                            disp(varargin{k});
+                            disp(varargin{k+1});
+                        end
+                        varargin([k, k+1]) = [];
+                    end
                 end
             end
-            self.add_vector(V, label, value, prop_vals);
+            if numel(varargin) == 1
+                varargin = repmat(varargin, size(V, 1), 1); 
+            end
+            self.add_vector(V, label, value, varargin);
         end
         
         function add_vector(self, V, label, value, prop_vals)
@@ -188,8 +214,9 @@ classdef Rosette < handle
             
             T = table(index, x, y, label, value);
             self.Vector = vertcat(self.Vector, T);
+            self.modify_colormap(self.CData, self.CDataMode);
             h = line(self.Parent, X, Y, ...
-                'Color', self.ColorOrder(index, :), ...
+                'Color', self.c(index, :), ...
                 'LineWidth', 0.5, 'LineStyle', ':', ...
                 'Tag', sprintf('%s.basis', label), ...
                 'MarkerIndices', 1, 'Marker', 'o', ...
@@ -200,17 +227,17 @@ classdef Rosette < handle
             self.theta(index) = atan2(y, x);
             self.r(index) = sqrt((X(2) - X(1))^2 + (Y(2) - Y(1))^2);
             self.label(index) = text(self.Parent, ...
-                self.label_offset .* self.r(index) .* cos(self.theta(index)) + self.Position(1), ...
-                self.label_offset .* self.r(index) .* sin(self.theta(index)) + self.Position(2), label, ...
-                'FontName', 'Tahoma', 'Color', self.ColorOrder(index, :), ...
+                self.LabelOffset .* self.r(index) .* cos(self.theta(index)) + self.Position(1), ...
+                self.LabelOffset .* self.r(index) .* sin(self.theta(index)) + self.Position(2), label, ...
+                'FontName', 'Tahoma', 'Color', self.c(index, :), ...
                 'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle', ...
                 'Rotation', 45, 'Tag', sprintf('%s.label', label));
-            z = [cos(self.theta(index)) -sin(self.theta(index)); sin(self.theta(index)) cos(self.theta(index))] * randn(2, numel(value{1})) .* self.cloud_jitter .* self.r(index);
+            z = [cos(self.theta(index)) -sin(self.theta(index)); sin(self.theta(index)) cos(self.theta(index))] * randn(2, numel(value{1})) .* self.Jitter .* self.r(index);
             xv = value{1} .* self.r(index) .* cos(self.theta(index)) + self.Position(1) + z(1, :)';
             yv = value{1} .* self.r(index) .* sin(self.theta(index)) + self.Position(2) + z(2, :)';
             self.cloud(index) = scatter(self.Parent, xv, yv, ...
                 'MarkerFaceAlpha', 0.20, 'MarkerEdgeColor', 'none', 'SizeData', 4, ...
-                'Marker', 'o', 'MarkerFaceColor', self.ColorOrder(index, :), ...
+                'Marker', 'o', 'MarkerFaceColor', self.c(index, :), ...
                 'Tag', sprintf('%s.cloud', label));
             self.cloud(index).Annotation.LegendInformation.IconDisplayStyle = 'off';
         end
@@ -246,15 +273,66 @@ classdef Rosette < handle
                 yv = cell(size(index));
                 for ii = 1:numel(index)
                     k = self.Vector.index == index(ii);
-                    z = [cos(self.theta(k)) -sin(self.theta(k)); sin(self.theta(k)) cos(self.theta(k))] * randn(2, numel(self.Vector.value{k})) .* self.cloud_jitter .* self.r(k);
+                    z = [cos(self.theta(k)) -sin(self.theta(k)); sin(self.theta(k)) cos(self.theta(k))] * randn(2, numel(self.Vector.value{k})) .* self.Jitter .* self.r(k);
                     xv{ii} = self.Vector.value{k} .* self.r(k) .* cos(self.theta(k)) + self.Position(1) + z(1, :)';
                     yv{ii} = self.Vector.value{k} .* self.r(k) .* sin(self.theta(k)) + self.Position(2) + z(2, :)';
                 end
             else
                 k = self.Vector.index == index;
-                z = [cos(self.theta(k)) -sin(self.theta(k)); sin(self.theta(k)) cos(self.theta(k))] * randn(2, numel(self.Vector.value{k})) .* self.cloud_jitter .* self.r(k);
+                z = [cos(self.theta(k)) -sin(self.theta(k)); sin(self.theta(k)) cos(self.theta(k))] * randn(2, numel(self.Vector.value{k})) .* self.Jitter .* self.r(k);
                 xv = self.Vector.value{k} .* self.r(k) .* cos(self.theta(k)) + self.Position(1) + z(1, :)';
                 yv = self.Vector.value{k} .* self.r(k) .* sin(self.theta(k)) + self.Position(2) + z(2, :)';
+            end
+        end
+        
+        function modify_colormap(self, CData, CDataMode)
+            %MODIFY_COLORMAP  Update the colormap and way it is used.
+            %
+            % Syntax:
+            %   r.modify_colormap(CData); % Only changes CData
+            %   r.modify_colormap(CData, CDataMode); % Change both
+            %   r.modify_colormap([], CDataMode); % Only changes CDataMode
+            %
+            % Inputs:
+            %   CData - New nColors x 3 array to use for label color keys.
+            %               Specify as [] to skip this input argument and
+            %               continue to use the colormap assigned to the
+            %               Rosette object.
+            %   CDataMode - (Optional) "auto" or "fixed". If not specified,
+            %                   the initial default setting is "auto" which
+            %                   sets CData indices to be distributed
+            %                   equally along the elements of the CData
+            %                   rows. "fixed" sets it so that each new
+            %                   vector is directly indexed to a new row of
+            %                   CData.
+            %
+            % See also: Contents, Rosette, add_vector, modify_vector
+            if isempty(CData)
+                CData = self.CData;
+            end
+            self.CData = CData;
+            if nargin > 1
+                if ~ismember(CDataMode, ["auto", "fixed"])
+                    error("CDataMode must be 'auto' or 'fixed' (value given was <strong>%s</strong>)\n", ...
+                        CDataMode);
+                end
+                self.CDataMode = CDataMode; 
+            end
+            switch self.CDataMode
+                case "auto"
+                    self.c = self.CData(1:size(self.Vector, 1), :);
+                case "fixed"
+                    iC = round(linspace(1, size(self.CData, 1), size(self.Vector, 1)));
+                    self.c = self.CData(iC, :);
+                otherwise
+                    error("Invalid value of CDataMode property: %s", self.CDataMode);
+            end
+            for ii = 1:size(self.Vector, 1)
+                if (numel(self.basis) >= ii) && ~isa(self.basis(ii), 'matlab.graphics.GraphicsPlaceholder')
+                    self.basis(ii).Color = self.c(ii, :);
+                    self.label(ii).Color = self.c(ii, :);
+                    self.cloud(ii).MarkerFaceColor = self.c(ii, :);
+                end
             end
         end
         
@@ -280,7 +358,7 @@ classdef Rosette < handle
             %               can use any modifiable {'Name',value} pair from
             %               MATLAB text object builtin.
             %
-            % See also: Contents, modify_ring, text
+            % See also: Contents, modify_cloud, text
             if islogical(index)
                 vec = 1:numel(index);
                 index = vec(index);
@@ -302,38 +380,25 @@ classdef Rosette < handle
         end
         
         function modify_label_offset(self, offset)
-            %MODIFY_LABEL_OFFSET  Change value of protected `label_offset` property
+            %MODIFY_LABEL_OFFSET  Change value of protected `LabelOffset` property
             %
             % Syntax:
-            %   r.modify_label(index, label, 'Name', value, ...);
-            %       % Apply same formatting to all label elements
-            %   r.modify_label(index, label, {'Name', value, ...},{'Name'...});
-            %       % Match each specific cell subset list to indexed
-            %       %   label elements.
+            %   r.modify_label_offset(offset);
+            %       % Applies same offset to all labels.
             %
             % Inputs:
-            %   index - The index from self.Vector to use when matching
-            %           indexing for which basis vectors to change labels
-            %           on.
-            %   label - String or string array or cell array of character
-            %           vectors that is the new label for any indexed basis
-            %           vectors of the Rosette. Can leave this empty to
-            %           skip it and just use varargin 'Name', value syntax.
-            %   varargin - {'Name', value} pairs for the indexed label,
-            %               can use any modifiable {'Name',value} pair from
-            %               MATLAB text object builtin.
+            %   offset - The new value of LabelOffset property.
             %
-            % See also: Contents, modify_ring, text
-            self.label_offset = offset;
+            % See also: Contents, modify_cloud, text
+            self.LabelOffset = offset;
             self.modify_vector();
         end
         
-        
-        function modify_ring(self, varargin)
-            %MODIFY_RING  Change values of 'Name', value pairs for "value" ring
+        function modify_cloud(self, varargin)
+            %MODIFY_CLOUD  Change values of 'Name', value pairs for "value" ring
             %
             % Syntax:
-            %   r.modify_ring('Name', value, ...);
+            %   r.modify_cloud('Name', value, ...);
             %
             % Accepts any 'Name', value argument pairs that MATLAB builtin
             % `line` would accept.
@@ -365,7 +430,7 @@ classdef Rosette < handle
             end
             for ii = 1:numel(index)
                 k = find(self.Vector.index == index(ii), 1, 'first');
-                z = [cos(self.theta(k)) -sin(self.theta(k)); sin(self.theta(k)) cos(self.theta(k))] * randn(2, numel(value{ii})) .* self.cloud_jitter .* self.r(k);
+                z = [cos(self.theta(k)) -sin(self.theta(k)); sin(self.theta(k)) cos(self.theta(k))] * randn(2, numel(value{ii})) .* self.Jitter .* self.r(k);
                 xv = value{k} .* self.r(k) .* cos(self.theta(k)) + self.Position(1) + z(1,:)';
                 yv = value{k} .* self.r(k) .* sin(self.theta(k)) + self.Position(2) + z(2,:)';
                 self.cloud(k).XData = xv;
@@ -442,8 +507,8 @@ classdef Rosette < handle
                 self.theta(k) = atan2(y, x);
                 self.r(k) = sqrt((X(2) - X(1))^2 + (Y(2) - Y(1))^2);
                 set(self.basis(k), 'XData', X, 'YData', Y, v{:});
-                self.label(k).Position(1:2) = [X(1) + self.label_offset * self.r(k) .* cos(self.theta(k)), ...
-                                               Y(1) + self.label_offset * self.r(k) .* sin(self.theta(k))];
+                self.label(k).Position(1:2) = [X(1) + self.LabelOffset * self.r(k) .* cos(self.theta(k)), ...
+                                               Y(1) + self.LabelOffset * self.r(k) .* sin(self.theta(k))];
                 [self.cloud(k).XData, self.cloud(k).YData] = self.get_scaled_value(index(ii));
             end 
         end
