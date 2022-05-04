@@ -136,30 +136,30 @@ classdef Rosette < handle
             if nargin < 6
                 value = nan(size(V, 1), 1);
             end
-            if nargin < 7
-                varargin = repmat({{}}, size(V, 1), 1);
-            else
-                k = 1;
-                while k <= numel(varargin)
-                    if iscell(varargin{k})
-                        k = k + 1;
-                    else
-                        try
-                            self.(varargin{k}) = varargin{k+1};
-                        catch
-                            if (k + 1) > numel(varargin)
-                                error("Bad number of 'Name', value pairs, check varargin input.");
-                            end
-                            warning("Error assigning varargin{%d} (varargin{%d}): ", k, k+1);
-                            disp(varargin{k});
-                            disp(varargin{k+1});
+
+            k = 1;
+            while k <= numel(varargin)
+                if iscell(varargin{k})
+                    k = k + 1;
+                else
+                    try
+                        self.(varargin{k}) = varargin{k+1};
+                    catch
+                        if (k + 1) > numel(varargin)
+                            error("Bad number of 'Name', value pairs, check varargin input.");
                         end
-                        varargin([k, k+1]) = [];
+                        warning("Error assigning varargin{%d} (varargin{%d}): ", k, k+1);
+                        disp(varargin{k});
+                        disp(varargin{k+1});
                     end
+                    varargin([k, k+1]) = [];
                 end
             end
+
             if numel(varargin) == 1
                 varargin = repmat(varargin, size(V, 1), 1); 
+            elseif numel(varargin) == 0
+                varargin = repmat({{}}, size(V, 1), 1);
             end
             self.add_vector(V, label, value, varargin);
         end
@@ -226,12 +226,24 @@ classdef Rosette < handle
             self.basis(index) = h;
             self.theta(index) = atan2(y, x);
             self.r(index) = sqrt((X(2) - X(1))^2 + (Y(2) - Y(1))^2);
+            rot = rad2deg(self.theta(index));
+            if (rot > 90) && (rot <= 270)
+                rot = rot - 180;
+                ha = 'right';
+            elseif (rot < -90) && (rot >= -270)
+                rot = rot + 180;
+                ha = 'right';
+            else
+                ha = 'left';
+            end
             self.label(index) = text(self.Parent, ...
                 self.LabelOffset .* self.r(index) .* cos(self.theta(index)) + self.Position(1), ...
                 self.LabelOffset .* self.r(index) .* sin(self.theta(index)) + self.Position(2), label, ...
-                'FontName', 'Tahoma', 'Color', self.c(index, :), ...
-                'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle', ...
-                'Rotation', 45, 'Tag', sprintf('%s.label', label));
+                'FontName', 'Tahoma', 'FontWeight', 'bold', ...
+                'Color', self.c(index, :), ...
+                'HorizontalAlignment', ha, ...
+                'VerticalAlignment', 'middle', ...
+                'Rotation', rot, 'Tag', sprintf('%s.label', label));
             z = [cos(self.theta(index)) -sin(self.theta(index)); sin(self.theta(index)) cos(self.theta(index))] * randn(2, numel(value{1})) .* self.Jitter .* self.r(index);
             xv = value{1} .* self.r(index) .* cos(self.theta(index)) + self.Position(1) + z(1, :)';
             yv = value{1} .* self.r(index) .* sin(self.theta(index)) + self.Position(2) + z(2, :)';
